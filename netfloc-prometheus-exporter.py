@@ -189,17 +189,21 @@ class NetflocCollector(object):
     try:
         # Service Function Chain-related flow statistics per host (SFC flows priority=20)
         for key, value in data_dict["flow_statistics_list"].items():
+            sfc_flows = []
             if key == "flow":
                 for i in range(0, len(value)):
-                    if value[i].get("opendaylight-flow-statistics:flow-statistics") is not None and value[i].get('priority') == 20:
-
-                        flow_duration = value[i].get("opendaylight-flow-statistics:flow-statistics").get("duration").get("second")
-                        flow_packet_count = value[i].get("opendaylight-flow-statistics:flow-statistics").get("packet-count")
-                        flow_byte_count = value[i].get("opendaylight-flow-statistics:flow-statistics").get("byte-count")
-
-                        self._metrics_flow[value[i].get('id').replace(":","_")]['flow-duration'].add_metric('flow-duration', flow_duration)
-                        self._metrics_flow[value[i].get('id').replace(":","_")]['flow-packet-count'].add_metric('flow-packet-count', flow_packet_count)
-                        self._metrics_flow[value[i].get('id').replace(":","_")]['flow-byte-count'].add_metric('flow-byte-count', flow_byte_count)
+                    flow_id = value[i].get('id')
+                    new_flow_id = str(flow_id).replace(":","_")
+                    pattern = re.compile("[a-zA-Z_:]([a-zA-Z0-9_:])*")
+                    if value[i].get("opendaylight-flow-statistics:flow-statistics") is not None and value[i].get('priority') == 20 and pattern.match(new_flow_id):
+                        sfc_flows.append(value[i].get("opendaylight-flow-statistics:flow-statistics"))
+                for index in range(0, len(sfc_flows)):
+                    flow_duration = sfc_flows[index].get("duration").get("second")
+                    flow_packet_count = sfc_flows[index].get("packet-count")
+                    flow_byte_count = sfc_flows[index].get("byte-count")
+                    self._metrics_flow[flows_list[index]]['flow-duration'].add_metric('flow-duration', flow_duration)
+                    self._metrics_flow[flows_list[index]]['flow-packet-count'].add_metric('flow-packet-count', flow_packet_count)
+                    self._metrics_flow[flows_list[index]]['flow-byte-count'].add_metric('flow-byte-count', flow_byte_count)
 
     except ConnectionError:
         print "Netfloc SFC flow statistics can not be retrieved."
@@ -233,15 +237,17 @@ class NetflocCollector(object):
             node_connector = requests.get(node_connector_url)
             node_connector_list = json.loads(node_connector.content).get("node")[0]
 
-            # Iterate ports list to setup acceptable port name. Format: port_name_port_number: tap596e3e22_12_76 -> name: tap596e3e22-12 number: 76
-            # Expeceted output example: [u'eth3_3', u'br0_LOCAL', u'eth2_2', u'eth1_1']
             for key, value in node_connector_list.items():
                 if "node-connector" in key:
                     for i in range(0, len(value)):
                         port_name = value[i].get("flow-node-inventory:name")
                         new_port_name = str(port_name).replace("-","_")
                         port_number = value[i].get("flow-node-inventory:port-number")
-                        ports_list.append(new_port_name+"_"+port_number)
+                        pattern = re.compile("[a-zA-Z_:]([a-zA-Z0-9_:])*")
+                        if pattern.match(new_port_name):
+                            ports_list.append(new_port_name+"_"+port_number)
+                        else:
+                            print 'Metric name does not match for:', new_port_name
 
         except ConnectionError:
             print "Netfloc port statistics can not be retrieved."
@@ -261,7 +267,11 @@ class NetflocCollector(object):
                         if value[i].get('priority') == 20:
                             flow_id = value[i].get('id')
                             new_flow_id = str(flow_id).replace(":","_")
-                            flows_list.append(new_flow_id)
+                            pattern = re.compile("[a-zA-Z_:]([a-zA-Z0-9_:])*")
+                            if pattern.match(new_flow_id):
+                                flows_list.append(new_flow_id)
+                            else:
+                                pass
 
         except ConnectionError:
             print "Netfloc flow statistics can not be retrieved."
