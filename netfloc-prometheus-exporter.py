@@ -41,15 +41,16 @@ except:
   import urllib.request as urllib2
 
 from prometheus_client import start_http_server
-from prometheus_client.core import GaugeMetricFamily, REGISTRY
+from prometheus_client.core import Gauge, GaugeMetricFamily, REGISTRY
 
-# Hosts related to the data exported.
-hosts_dict = {}
+pattern = re.compile("[a-zA-Z_:]([a-zA-Z0-9_:])*")
 
 class NetflocCollector(object):
   def __init__(self, target, netfloc_inventory_url):
     self._target = target.rstrip("/")
     self._netfloc_inventory_url = netfloc_inventory_url
+    # Hosts related to the data exported.
+    self.hosts_dict = {}
 
     try:
         inventory = requests.get(self._netfloc_inventory_url)
@@ -59,7 +60,7 @@ class NetflocCollector(object):
 
             ip_addr = host.get("flow-node-inventory:ip-address")
             host_name = self._ip_to_host_name_mapping(ip_addr)
-            hosts_dict[host_name] = host.get("id")
+            self.hosts_dict[host_name] = host.get("id")
 
     except ConnectionError:
         print "Netfloc is either not running or it is unreachable."
@@ -72,7 +73,7 @@ class NetflocCollector(object):
           '192.168.5.11': 'control',
       }.get(ip, 'Wrong IP address.')
 
-  def _setup_new_metrics(self, host, ports_list, flows_list):
+  def _setup_new_metrics(self):
 
     # Metrics to export from Netfloc.
     self._metrics_host = {}
@@ -81,62 +82,56 @@ class NetflocCollector(object):
 
     self._metrics_flow = {}
 
-    openflow_id = hosts_dict[host].replace(":", "_")
-
-    # Example metric: netfloc_packet_count_compute
-    self._metrics_host[host] = {
+    # Example metric: netfloc_packet_count{node_label="control_openflow_132129486422869"}
+    self._metrics_host = {
     'byte-count':
-    GaugeMetricFamily('netfloc_byte_count_'+host,
-        'Netfloc byte count per node', labels=[openflow_id]),
+    GaugeMetricFamily('netfloc_byte_count',
+        'Netfloc byte count per node', labels=["node_label"]),
     'flow-count':
-    GaugeMetricFamily('netfloc_flow_count_'+host,
-        'Netfloc flow count per node', labels=[openflow_id]),
+    GaugeMetricFamily('netfloc_flow_count',
+        'Netfloc flow count per node', labels=["node_label"]),
     'packet-count':
-    GaugeMetricFamily('netfloc_packet_count_'+host,
-        'Netfloc packet count per node', labels=[openflow_id]),
+    GaugeMetricFamily('netfloc_packet_count',
+        'Netfloc packet count per node', labels=["node_label"]),
     'active-flows':
-    GaugeMetricFamily('netfloc_active_flows_'+host,
-        'Netfloc active flows per node', labels=[openflow_id]),
+    GaugeMetricFamily('netfloc_active_flows',
+        'Netfloc active flows per node', labels=["node_label"]),
     'packets-lookedup':
-    GaugeMetricFamily('netfloc_packets_looked_up_'+host,
-        'Netfloc packets lookedup per node', labels=[openflow_id]),
+    GaugeMetricFamily('netfloc_packets_looked_up',
+        'Netfloc packets lookedup per node', labels=["node_label"]),
     'packets-matched':
-    GaugeMetricFamily('netfloc_packets_matched_'+host,
-        'Netfloc packets matched per node', labels=[openflow_id])
+    GaugeMetricFamily('netfloc_packets_matched',
+        'Netfloc packets matched per node', labels=["node_label"])
     }
 
-    for port in ports_list:
+    # Example metric: netfloc_bytes_received{node="compute",port="eth1_80"}
+    self._metrics_port = {
+    'packets-received':
+    GaugeMetricFamily('netfloc_packets_received',
+        'Netfloc packets received per node and per port', labels=["node", "port"]),
+    'packets-transmitted':
+    GaugeMetricFamily('netfloc_packets_transmitted',
+        'Netfloc packets transmitted per node and per port', labels=["node", "port"]),
+    'bytes-received':
+    GaugeMetricFamily('netfloc_bytes_received',
+        'Netfloc bytes received per node and per port', labels=["node", "port"]),
+    'bytes-transmitted':
+    GaugeMetricFamily('netfloc_bytes_transmitted',
+        'Netfloc bytes transmitted per node and per port', labels=["node", "port"])
+    }
 
-        # Example metric: netfloc_bytes_received_control_eth1_1
-        self._metrics_port[port] = {
-        'packets-received':
-        GaugeMetricFamily('netfloc_packets_received_'+host+'_'+port,
-            'Netfloc packets received per node and per port', labels=[host+'_'+port]),
-        'packets-transmitted':
-        GaugeMetricFamily('netfloc_packets_transmitted_'+host+'_'+port,
-            'Netfloc packets transmitted per node and per port', labels=[host+'_'+port]),
-        'bytes-received':
-        GaugeMetricFamily('netfloc_bytes_received_'+host+'_'+port,
-            'Netfloc bytes received per node and per port', labels=[host+'_'+port]),
-        'bytes-transmitted':
-        GaugeMetricFamily('netfloc_bytes_transmitted_'+host+'_'+port,
-            'Netfloc bytes transmitted per node and per port', labels=[host+'_'+port])
-        }
-
-    for flow in flows_list:
-
-        # Example metric: netfloc_flow_packet_count_compute_ServiceChainEndRewrite_2_1_00_00_e8_94_f6_08_53_70
-        self._metrics_flow[flow] = {
-        'flow-duration':
-        GaugeMetricFamily('netfloc_flow_duration_'+host+'_'+flow,
-            'Netfloc flow duration per node', labels=[flow]),
-        'flow-packet-count':
-        GaugeMetricFamily('netfloc_flow_packet_count_'+host+'_'+flow,
-            'Netfloc flow packet count per node', labels=[flow]),
-        'flow-byte-count':
-        GaugeMetricFamily('netfloc_flow_byte_count_'+host+'_'+flow,
-            'Netfloc flow byte count per node', labels=[flow]),
-        }
+    # Example metric: netfloc_flow_packet_count{node="compute",flow="ServiceChainEndRewrite_2_1_00_00_e8_94_f6_08_53_70"}
+    self._metrics_flow = {
+    'flow-duration':
+    GaugeMetricFamily('netfloc_flow_duration',
+        'Netfloc flow duration per node', labels=["node", "flow"]),
+    'flow-packet-count':
+    GaugeMetricFamily('netfloc_flow_packet_count',
+        'Netfloc flow packet count per node', labels=["node", "flow"]),
+    'flow-byte-count':
+    GaugeMetricFamily('netfloc_flow_byte_count',
+        'Netfloc flow byte count per node', labels=["node", "flow"]),
+    }
 
   def _request_netfloc_data(self, host, node_connector_list, flow_statistics_list):
 
@@ -145,14 +140,22 @@ class NetflocCollector(object):
 
     try:
         # Flow table statistics per host (eg. netfloc, compute, control and neutron)
-        table_flow_statistics_url = "%s%s%s%s" % (self._netfloc_inventory_url,'/node/',hosts_dict[host],'/table/0/opendaylight-flow-table-statistics:flow-table-statistics')
-        table_flow_statistics = requests.get(table_flow_statistics_url)
-        data_dict["table_flow_statistics"] = table_flow_statistics
-
+        try:
+            table_flow_statistics_url = "%s%s%s%s" % (self._netfloc_inventory_url,'/node/',self.hosts_dict[host],'/table/0/opendaylight-flow-table-statistics:flow-table-statistics')
+            table_flow_statistics = requests.get(table_flow_statistics_url)
+            table_flow_statistics.raise_for_status()
+            data_dict["table_flow_statistics"] = table_flow_statistics
+        except requests.exceptions.HTTPError as err:
+            print "Can not retrieve flow table statistics:", err
         # Aggregate flow statistics per host (eg. netfloc, compute, control and neutron)
-        aggregate_flow_statistics_url = "%s%s%s%s" % (self._netfloc_inventory_url,'/node/',hosts_dict[host],'/table/0/aggregate-flow-statistics/')
-        aggregate_flow_statistics = requests.get(aggregate_flow_statistics_url)
-        data_dict["aggregate_flow_statistics"] = aggregate_flow_statistics
+        try:
+            aggregate_flow_statistics_url = "%s%s%s%s" % (self._netfloc_inventory_url,'/node/',self.hosts_dict[host],'/table/0/aggregate-flow-statistics/')
+            aggregate_flow_statistics = requests.get(aggregate_flow_statistics_url)
+            aggregate_flow_statistics.raise_for_status()
+            data_dict["aggregate_flow_statistics"] = aggregate_flow_statistics
+        except requests.exceptions.HTTPError as err:
+            pass
+            #print "Can not retrieve aggregate flow statistics:", err
 
         # Service Function Chain-related flow statistics per host (eg. netfloc, compute, control and neutron)
         data_dict["flow_statistics_list"] = flow_statistics_list
@@ -160,56 +163,62 @@ class NetflocCollector(object):
         # Port statistics per host (eg. netfloc, compute, control and neutron)
         data_dict["node_connector_list"] = node_connector_list
 
+        return data_dict
 
     except ConnectionError:
         print("Error fetching data from Netfloc.")
 
-    return data_dict
+  def _add_data_prometheus(self, host, data_dict, ports_list, flows_list):
 
-  def _add_data_prometheus(self, data_dict, host, ports_list, flows_list):
+    openflow_id = self.hosts_dict[host].replace(":", "_")
+    host_label = '%s_%s' % (host, openflow_id)
+
+    self._labels_list = {}
+    self._labels_list["host_label"] = host_label
+    self._labels_list["host"] = host
 
     try:
         # Flow table statistics per host
-        table_flow_statistics = json.loads(data_dict["table_flow_statistics"].content).get("opendaylight-flow-table-statistics:flow-table-statistics")
-        self._metrics_host[host]['active-flows'].add_metric('active-flows', table_flow_statistics.get("active-flows"))
-        self._metrics_host[host]['packets-lookedup'].add_metric('packets-lookedup', table_flow_statistics.get("packets-looked-up"))
-        self._metrics_host[host]['packets-matched'].add_metric('packets-matched', table_flow_statistics.get("packets-matched"))
+            table_flow_statistics = json.loads(data_dict["table_flow_statistics"].content).get("opendaylight-flow-table-statistics:flow-table-statistics")
+            self._metrics_host['active-flows'].add_metric([self._labels_list["host_label"]], table_flow_statistics.get("active-flows"))
+            self._metrics_host['packets-lookedup'].add_metric([self._labels_list["host_label"]], table_flow_statistics.get("packets-looked-up"))
+            self._metrics_host['packets-matched'].add_metric([self._labels_list["host_label"]], table_flow_statistics.get("packets-matched"))
     except ConnectionError:
         print "Netfloc flow table statistics can not be retrieved."
 
     try:
         # Aggregate flow statistics per host
         aggregate_flow_statistics = json.loads(data_dict["aggregate_flow_statistics"].content).get("opendaylight-flow-statistics:aggregate-flow-statistics")
-        self._metrics_host[host]['byte-count'].add_metric('byte-count', aggregate_flow_statistics.get("byte-count"))
-        self._metrics_host[host]['flow-count'].add_metric('flow-count', aggregate_flow_statistics.get("flow-count"))
-        self._metrics_host[host]['packet-count'].add_metric('packet-count', aggregate_flow_statistics.get("packet-count"))
+        self._metrics_host['byte-count'].add_metric([self._labels_list["host_label"]], aggregate_flow_statistics.get("byte-count"))
+        self._metrics_host['flow-count'].add_metric([self._labels_list["host_label"]], aggregate_flow_statistics.get("flow-count"))
+        self._metrics_host['packet-count'].add_metric([self._labels_list["host_label"]], aggregate_flow_statistics.get("packet-count"))
     except ConnectionError:
         print "Netfloc aggregate flow statistics can not be retrieved."
 
     try:
         # Service Function Chain-related flow statistics per host (SFC flows priority=20)
+        #for flows in flows_list:
         for key, value in data_dict["flow_statistics_list"].items():
             sfc_flows = []
             if key == "flow":
                 for i in range(0, len(value)):
-                    flow_id = value[i].get('id')
-                    new_flow_id = str(flow_id).replace(":","_")
-                    pattern = re.compile("[a-zA-Z_:]([a-zA-Z0-9_:])*")
-                    if value[i].get("opendaylight-flow-statistics:flow-statistics") is not None and value[i].get('priority') == 20 and pattern.match(new_flow_id):
-                        sfc_flows.append(value[i].get("opendaylight-flow-statistics:flow-statistics"))
-                for index in range(0, len(sfc_flows)):
-                    flow_duration = sfc_flows[index].get("duration").get("second")
-                    flow_packet_count = sfc_flows[index].get("packet-count")
-                    flow_byte_count = sfc_flows[index].get("byte-count")
-                    self._metrics_flow[flows_list[index]]['flow-duration'].add_metric('flow-duration', flow_duration)
-                    self._metrics_flow[flows_list[index]]['flow-packet-count'].add_metric('flow-packet-count', flow_packet_count)
-                    self._metrics_flow[flows_list[index]]['flow-byte-count'].add_metric('flow-byte-count', flow_byte_count)
+                    if value[i].get("opendaylight-flow-statistics:flow-statistics") is not None:
+                        for index in range(0, len(flows_list)):
+                            if value[i].get('priority') == 20:
+                                sfc_flows.append(value[i].get("opendaylight-flow-statistics:flow-statistics"))
+                                flow_duration = sfc_flows[index].get("duration").get("second")
+                                flow_packet_count = sfc_flows[index].get("packet-count")
+                                flow_byte_count = sfc_flows[index].get("byte-count")
+                                self._metrics_flow['flow-duration'].add_metric([self._labels_list["host"], sfc_flows[index]], flow_duration)
+                                self._metrics_flow['flow-packet-count'].add_metric([self._labels_list["host"], sfc_flows[index]], flow_packet_count)
+                                self._metrics_flow['flow-byte-count'].add_metric([self._labels_list["host"], sfc_flows[index]], flow_byte_count)
 
     except ConnectionError:
         print "Netfloc SFC flow statistics can not be retrieved."
 
     try:
         # Port statistics per host (eg. netfloc, compute, control and neutron)
+        #for ports in ports_list:
         for key, value in data_dict["node_connector_list"].items():
             if "node-connector" in key:
                 for i in range(0, len(value)):
@@ -219,77 +228,76 @@ class NetflocCollector(object):
                         bytes_received = value[i].get("opendaylight-port-statistics:flow-capable-node-connector-statistics").get("bytes").get("received")
                         bytes_transmitted = value[i].get("opendaylight-port-statistics:flow-capable-node-connector-statistics").get("bytes").get("received")
 
-                        self._metrics_port[ports_list[i]]['packets-received'].add_metric('packets-received', packets_received)
-                        self._metrics_port[ports_list[i]]['packets-transmitted'].add_metric('packets-transmitted', packets_transmitted)
-                        self._metrics_port[ports_list[i]]['bytes-received'].add_metric('bytes-received', bytes_received)
-                        self._metrics_port[ports_list[i]]['bytes-transmitted'].add_metric('bytes-transmitted', bytes_transmitted)
+                        self._metrics_port['packets-received'].add_metric([self._labels_list["host"], ports_list[i]], packets_received)
+                        self._metrics_port['packets-transmitted'].add_metric([self._labels_list["host"], ports_list[i]], packets_transmitted)
+                        self._metrics_port['bytes-received'].add_metric([self._labels_list["host"], ports_list[i]], bytes_received)
+                        self._metrics_port['bytes-transmitted'].add_metric([self._labels_list["host"], ports_list[i]], bytes_transmitted)
     except ConnectionError:
         print "Netfloc port statistics can not be retrieved."
 
   def collect(self):
 
-    for host in hosts_dict:
+    try:
 
-        ports_list = []
+        self._setup_new_metrics()
 
-        try:
-            node_connector_url = "%s%s%s" % (self._netfloc_inventory_url,'/node/',hosts_dict[host])
-            node_connector = requests.get(node_connector_url)
-            node_connector_list = json.loads(node_connector.content).get("node")[0]
+        for host in self.hosts_dict:
 
-            for key, value in node_connector_list.items():
-                if "node-connector" in key:
-                    for i in range(0, len(value)):
-                        port_name = value[i].get("flow-node-inventory:name")
-                        new_port_name = str(port_name).replace("-","_")
-                        port_number = value[i].get("flow-node-inventory:port-number")
-                        pattern = re.compile("[a-zA-Z_:]([a-zA-Z0-9_:])*")
-                        if pattern.match(new_port_name):
-                            ports_list.append(new_port_name+"_"+port_number)
-                        else:
-                            print 'Metric name does not match for:', new_port_name
+            ports_list = []
 
-        except ConnectionError:
-            print "Netfloc port statistics can not be retrieved."
+            try:
+                node_connector_url = "%s%s%s" % (self._netfloc_inventory_url,'/node/',self.hosts_dict[host])
+                node_connector = requests.get(node_connector_url)
+                node_connector_list = json.loads(node_connector.content).get("node")[0]
 
-        flows_list = []
+                for key, value in node_connector_list.items():
+                    if "node-connector" in key:
+                        for i in range(0, len(value)):
+                            port_name = re.sub(r'[^\w]', '_', str(value[i].get("flow-node-inventory:name")).lower())
+                            port_number = value[i].get("flow-node-inventory:port-number")
+                            if pattern.match(port_name):
+                                ports_list.append("%s%s%s" % (port_name,'_',str(port_number)))
 
-        try:
-            flow_statistics_url =  "%s%s%s%s" % (self._netfloc_inventory_url,'/node/',hosts_dict[host],'/table/0/')
-            flow_statistics = requests.get(flow_statistics_url)
-            flow_statistics_list = json.loads(flow_statistics.content).get('flow-node-inventory:table')[0]
 
-            # Iterate flows list to filter the IDs of the Service Function Chain flows (priority=20)
-            # Format: flow_id: ServiceChainEndRewrite_3_1_00_00_e8_94_f6_08_53_70
-            for key, value in flow_statistics_list.items():
-                if key == "flow":
-                    for i in range(0, len(value)):
-                        if value[i].get('priority') == 20:
-                            flow_id = value[i].get('id')
-                            new_flow_id = str(flow_id).replace(":","_")
-                            pattern = re.compile("[a-zA-Z_:]([a-zA-Z0-9_:])*")
-                            if pattern.match(new_flow_id):
-                                flows_list.append(new_flow_id)
-                            else:
-                                pass
+            except ConnectionError:
+                print "Netfloc port statistics can not be retrieved."
 
-        except ConnectionError:
-            print "Netfloc flow statistics can not be retrieved."
+            flows_list = []
 
-        self._setup_new_metrics(host, ports_list, flows_list)
-        data_dict = self._request_netfloc_data(host, node_connector_list, flow_statistics_list)
-        self._add_data_prometheus(data_dict, host, ports_list, flows_list)
+            try:
+                flow_statistics_url =  "%s%s%s%s" % (self._netfloc_inventory_url,'/node/',self.hosts_dict[host],'/table/0/')
+                flow_statistics = requests.get(flow_statistics_url)
+                flow_statistics_list = json.loads(flow_statistics.content).get('flow-node-inventory:table')[0]
 
-        for metric_host in self._metrics_host[host].values():
+                # Iterate flows list to filter the IDs of the Service Function Chain flows (priority=20)
+                # Format: flow_id: ServiceChainEndRewrite_3_1_00_00_e8_94_f6_08_53_70
+                for key, value in flow_statistics_list.items():
+                    if key == "flow":
+                        for i in range(0, len(value)):
+                            if value[i].get('priority') == 20 and not re.search('UF',value[i].get('id')):
+                                flow_id = re.sub(r'[^\w]', '_', str(value[i].get('id')).lower())
+                                if pattern.match(flow_id):
+                                    flows_list.append(flow_id)
+
+            except ConnectionError:
+                print "Netfloc flow statistics can not be retrieved."
+
+            data_dict = self._request_netfloc_data(host, node_connector_list, flow_statistics_list)
+            self._add_data_prometheus(host, data_dict, ports_list, flows_list)
+
+        for metric_host in self._metrics_host.values():
             yield metric_host
 
-        for port in ports_list:
-            for metric_port in self._metrics_port[port].values():
-                yield metric_port
 
-        for flow in flows_list:
-            for metric_flow in self._metrics_flow[flow].values():
-                yield metric_flow
+        for metric_port in self._metrics_port.values():
+            yield metric_port
+
+
+        for metric_flow in self._metrics_flow.values():
+            yield metric_flow
+
+    except ConnectionError:
+        print "Netfloc metrics can not be retrieved and displayed."
 
 def parse_args():
     parser = argparse.ArgumentParser(
