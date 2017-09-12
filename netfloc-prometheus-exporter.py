@@ -120,7 +120,7 @@ class NetflocCollector(object):
         'Netfloc bytes transmitted per node and per port', labels=["node", "port"])
     }
 
-    # Example metric: netfloc_flow_packet_count{node="compute",flow="ServiceChainEndRewrite_2_1_00_00_e8_94_f6_08_53_70"}
+    # Example metric: netfloc_flow_packet_count{node="netfloc",flow="ServiceChainEndRewrite_2_1_00_00_e8_94_f6_08_53_70"}
     self._metrics_flow = {
     'flow-duration':
     GaugeMetricFamily('netfloc_flow_duration',
@@ -197,7 +197,6 @@ class NetflocCollector(object):
 
     try:
         # Service Function Chain-related flow statistics per host (SFC flows priority=20)
-        #for flows in flows_list:
         for key, value in data_dict["flow_statistics_list"].items():
             sfc_flows = []
             if key == "flow":
@@ -209,16 +208,16 @@ class NetflocCollector(object):
                                 flow_duration = sfc_flows[index].get("duration").get("second")
                                 flow_packet_count = sfc_flows[index].get("packet-count")
                                 flow_byte_count = sfc_flows[index].get("byte-count")
-                                self._metrics_flow['flow-duration'].add_metric([self._labels_list["host"], sfc_flows[index]], flow_duration)
-                                self._metrics_flow['flow-packet-count'].add_metric([self._labels_list["host"], sfc_flows[index]], flow_packet_count)
-                                self._metrics_flow['flow-byte-count'].add_metric([self._labels_list["host"], sfc_flows[index]], flow_byte_count)
+
+                                self._metrics_flow['flow-duration'].add_metric([self._labels_list["host"], flows_list[index]], flow_duration)
+                                self._metrics_flow['flow-packet-count'].add_metric([self._labels_list["host"], flows_list[index]], flow_packet_count)
+                                self._metrics_flow['flow-byte-count'].add_metric([self._labels_list["host"], flows_list[index]], flow_byte_count)
 
     except ConnectionError:
         print "Netfloc SFC flow statistics can not be retrieved."
 
     try:
         # Port statistics per host (eg. netfloc, compute, control and neutron)
-        #for ports in ports_list:
         for key, value in data_dict["node_connector_list"].items():
             if "node-connector" in key:
                 for i in range(0, len(value)):
@@ -275,7 +274,7 @@ class NetflocCollector(object):
                     if key == "flow":
                         for i in range(0, len(value)):
                             if value[i].get('priority') == 20 and not re.search('UF',value[i].get('id')):
-                                flow_id = re.sub(r'[^\w]', '_', str(value[i].get('id')).lower())
+                                flow_id = re.sub(r'[^\w]', '_', str(value[i].get('id')))
                                 if pattern.match(flow_id):
                                     flows_list.append(flow_id)
 
